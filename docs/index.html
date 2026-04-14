@@ -113,58 +113,158 @@
         }
 
         function drawLevels() {
-            // We sample a grid in the dual plane to find region labels
-            // This is more robust for dynamic UI than a full DCEL for small N
             let v = views[1];
-            let step = 40 / v.s; 
-            let startX = (-v.cx - v.x) / v.s;
-            let endX = (width/2 - v.cx - v.x) / v.s;
-            let startY = (-v.cy - v.y) / v.s;
-            let endY = (height - v.cy - v.y) / v.s;
+            let startX = (width/2 - (v.cx + v.x)) / v.s;
+            let endX = (width - (v.cx + v.x)) / v.s;
+            let startY = (v.cy + v.y - height) / v.s;
+            let endY = (v.cy + v.y) / v.s;
 
-            textSize(12 / v.s);
+            // Start with the bounding box of the dual plane viewport
+            let polygons = [{
+                vertices: [
+                    {x: startX, y: startY}, 
+                    {x: endX, y: startY}, 
+                    {x: endX, y: endY}, 
+                    {x: startX, y: endY}
+                ],
+                level: 0
+            }];
+
+            // Recursively split polygons by each line
+            for (let p of points) {
+                let nextPolygons = [];
+                for (let poly of polygons) {
+                    let polyBelow = clipPolygonSide(poly.vertices, p, true);
+                    let polyAbove = clipPolygonSide(poly.vertices, p, false);
+                    
+                    if (polyBelow.length > 2) {
+                        nextPolygons.push({ vertices: polyBelow, level: poly.level + 1 });
+                    }
+                    if (polyAbove.length > 2) {
+                        nextPolygons.push({ vertices: polyAbove, level: poly.level });
+                    }
+                }
+                polygons = nextPolygons;
+            }
+
+            let maxPoints = max(points.length, 1);
+            noStroke();
+
+            // Draw regions
+            for (let poly of polygons) {
+                let hue = map(poly.level, 0, maxPoints, 240, 0);
+                fill(`hsla(${hue}, 80%, 35%, 0.7)`);
+                beginShape();
+                for (let pt of poly.vertices) {
+                    vertex(pt.x, pt.y);
+                }
+                endShape(CLOSE);
+            }
+
+            // Draw labels mathematically centered
             textAlign(CENTER, CENTER);
-
-            // Logic for "Visually seeing regions"
-            // We'll use a coarser grid to color and label
-            let gridRes = 30; 
-            let cellW = (endX - startX) / gridRes;
-            let cellH = (endY - startY) / gridRes;
-
-            for(let i = 0; i < gridRes; i++) {
-                for(let j = 0; j < gridRes; j++) {
-                    let cx = startX + i * cellW + cellW/2;
-                    let cy = startY + j * cellH + cellH/2;
+            for (let poly of polygons) {
+                let area = calculatePolygonArea(poly.vertices);
+                let screenArea = area * v.s * v.s;
+                
+                // Only label regions that take up some meaningful screen space
+                if (screenArea > 100) { 
+                    let c = calculatePolygonCentroid(poly.vertices);
+                    push();
+                    translate(c.x, c.y);
+                    // Negate coordinate scaling to render fixed pixel size text upright
+                    scale(1/v.s, -1/v.s); 
                     
-                    let linesBelow = 0;
-                    for(let p of points) {
-                        if (p.a * cx - p.b <= cy) linesBelow++;
-                    }
-
-                    noStroke();
-                    let hue = map(linesBelow, 0, points.length, 200, 360);
-                    fill(color(`hsla(${hue}, 50%, 30%, 0.3)`));
-                    rect(startX + i * cellW, startY + j * cellH, cellW, cellH);
-                    
-                    // Label every few cells or center of "unique" areas
-                    if (i % 3 == 0 && j % 3 == 0) {
-                        fill(255, 150);
-                        text(linesBelow, cx, cy);
-                    }
+                    textSize(15);
+                    textStyle(BOLD);
+                    fill(0, 200);
+                    text(poly.level, 1, 1); // Drop shadow
+                    fill(255);
+                    text(poly.level, 0, 0);
+                    pop();
                 }
             }
         }
 
-        function drawGrid() {
-            stroke(30);
-            strokeWeight(1 / 20);
-            for(let i = -100; i <= 100; i += 1) {
-                line(i, -100, i, 100);
-                line(-100, i, 100, i);
+        function clipPolygonSide(polygon, lineP, keepBelow) {
+            let result = [];
+            if (polygon.length < 3) return result;
+            
+            for (let i = 0; i < polygon.length; i++) {
+                let cur = polygon[i];
+                let prev = polygon[(i - 1 + polygon.length) % polygon.length];
+                
+                let curVal = lineP.a * cur.x - cur.y - lineP.b;
+                let prevVal = lineP.a * prev.x - prev.y - lineP.b;
+                
+                let curInside = keepBelow ? (curVal <= 0) : (curVal > 0);
+                let prevInside = keepBelow ? (prevVal <= 0) : (prevVal > 0);
+                
+                if (curInside) {
+                    if (!prevInside) {
+                        result.push(intersectLineSegments(prev, cur, lineP));
+                    }
+                    result.push(cur);
+                } else if (prevInside) {
+                    result.push(intersectLineSegments(prev, cur, lineP));
+                }
             }
+            
+            // Deduplicate generated vertices due to clipping precisely on a point
+            let dedup = [];
+            for (let v of result) {
+                if (dedup.length === 0 || dist(dedup[dedup.length-1].x, dedup[dedup.length-1].y, v.x, v.y) > 1e-7) {
+                    dedup.push(v);
+                }
+            }
+            if (dedup.length > 1 && dist(dedup[0].x, dedup[0].y, dedup[dedup.length-1].x, dedup[dedup.length-1].y) < 1e-7) {
+                dedup.pop();
+            }
+            return dedup;
+        }
+
+        function intersectLineSegments(p1, p2, lineP) {
+            let dx = p2.x - p1.x;
+            let dy = p2.y - p1.y;
+            let denom = lineP.a * dx - dy;
+            if (Math.abs(denom) < 1e-12) return {x: p1.x, y: p1.y}; 
+            let num = lineP.b + p1.y - lineP.a * p1.x;
+            let t = num / denom;
+            return { x: p1.x + t * dx, y: p1.y + t * dy };
+        }
+
+        function calculatePolygonArea(vertices) {
+            let area = 0;
+            for (let i = 0; i < vertices.length; i++) {
+                let j = (i + 1) % vertices.length;
+                area += vertices[i].x * vertices[j].y - vertices[j].x * vertices[i].y;
+            }
+            return Math.abs(area / 2);
+        }
+
+        function calculatePolygonCentroid(vertices) {
+            let cx = 0, cy = 0;
+            let area = 0;
+            for (let i = 0; i < vertices.length; i++) {
+                let j = (i + 1) % vertices.length;
+                let factor = vertices[i].x * vertices[j].y - vertices[j].x * vertices[i].y;
+                cx += (vertices[i].x + vertices[j].x) * factor;
+                cy += (vertices[i].y + vertices[j].y) * factor;
+                area += factor;
+            }
+            area /= 2;
+            if (Math.abs(area) < 1e-9) return vertices[0];
+            cx /= (6 * area);
+            cy /= (6 * area);
+            return {x: cx, y: cy};
+        }
+
+
+        function drawGrid() {
             stroke(60);
-            line(-100, 0, 100, 0);
-            line(0, -100, 0, 100);
+            strokeWeight(1 / 20);
+            line(-100000, 0, 100000, 0);
+            line(0, -100000, 0, 100000);
         }
 
         function applyView(v) {
