@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
+        .controls {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; z-index: 10;
+        }
+        button {
+            padding: 8px 16px; cursor: pointer; border-radius: 4px; border: none;
+            background: #333; color: white; transition: 0.2s;
+        }
+        button:hover { background: #444; }
+        .label {
+            position: absolute; top: 10px; color: #aaa; font-size: 12px; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="label" style="left: 20px;">PRIMAL PLANE (Points) - Drag Points, Space to Pan, Shift+Click to Add</div>
+    <div class="label" style="right: 20px;">DUAL PLANE (Lines: y = ax - b) - Regions colored by lines below</div>
+    <div class="controls">
+        <button onclick="resetPoints()">Clear All</button>
+        <button onclick="removeLast()">Undo Point</button>
+        <button onclick="centerDual()">Recenter Dual</button>
+    </div>
+
+    <script>
+        let points = [];
+        let views = [];
+        let draggedPoint = null;
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            // View [x_offset, y_offset, scale, centerX, centerY]
+            views[0] = { x: -width/4, y: 0, s: 20, cx: width/4, cy: height/2 }; // Primal
+            views[1] = { x: 0, y: 0, s: 20, cx: 3*width/4, cy: height/2 };    // Dual
+            
+            // Initial dummy points
+            points.push({a: 1, b: 2}, {a: -2, b: -1}, {a: 0.5, b: -3});
+        }
+
+        function draw() {
+            background(15);
+            
+            // Handle Cursor Appearance
+            updateCursor();
+
+            // Draw Splitter
+            stroke(40);
+            line(width/2, 0, width/2, height);
+
+            drawPrimal();
+            drawDual();
+        }
+
+        function updateCursor() {
+            if (mouseX < width / 2) {
+                if (keyIsDown(SHIFT)) {
+                    cursor(CROSS);
+                } else {
+                    let p = getPointAt(mouseX, mouseY);
+                    if (p) {
+                        cursor('grab');
+                    } else {
+                        cursor(ARROW);
+                    }
+                }
+            } else {
+                cursor(ARROW);
+            }
+        }
+
+        function drawPrimal() {
+            push();
+            clipPlane(0, 0, width/2, height);
+            applyView(views[0]);
+            
+            // Grid
+            drawGrid();
+
+            // Points
+            noStroke();
+            fill(0, 200, 255);
+            for(let p of points) {
+                ellipse(p.a, p.b, 8/views[0].s, 8/views[0].s);
+            }
+            pop();
+        }
+
+        function drawDual() {
+            push();
+            clipPlane(width/2, 0, width/2, height);
+            applyView(views[1]);
+
+            // Region Visualization (Heatmap-style for performance)
+            if (points.length > 0) {
+                drawLevels();
+            }
+
+            drawGrid();
+
+            // Dual Lines: y = ax - b
+            stroke(255, 100, 100, 200);
+            strokeWeight(1.5 / views[1].s);
+            for(let p of points) {
+                let xStart = -1000, xEnd = 1000;
+                line(xStart, p.a * xStart - p.b, xEnd, p.a * xEnd - p.b);
+            }
+            pop();
+        }
+
+        function drawLevels() {
+            // We sample a grid in the dual plane to find region labels
+            // This is more robust for dynamic UI than a full DCEL for small N
+            let v = views[1];
+            let step = 40 / v.s; 
+            let startX = (-v.cx - v.x) / v.s;
+            let endX = (width/2 - v.cx - v.x) / v.s;
+            let startY = (-v.cy - v.y) / v.s;
+            let endY = (height - v.cy - v.y) / v.s;
+
+            textSize(12 / v.s);
+            textAlign(CENTER, CENTER);
+
+            // Logic for "Visually seeing regions"
+            // We'll use a coarser grid to color and label
+            let gridRes = 30; 
+            let cellW = (endX - startX) / gridRes;
+            let cellH = (endY - startY) / gridRes;
+
+            for(let i = 0; i < gridRes; i++) {
+                for(let j = 0; j < gridRes; j++) {
+                    let cx = startX + i * cellW + cellW/2;
+                    let cy = startY + j * cellH + cellH/2;
+                    
+                    let linesBelow = 0;
+                    for(let p of points) {
+                        if (p.a * cx - p.b <= cy) linesBelow++;
+                    }
+
+                    noStroke();
+                    let hue = map(linesBelow, 0, points.length, 200, 360);
+                    fill(color(`hsla(${hue}, 50%, 30%, 0.3)`));
+                    rect(startX + i * cellW, startY + j * cellH, cellW, cellH);
+                    
+                    // Label every few cells or center of "unique" areas
+                    if (i % 3 == 0 && j % 3 == 0) {
+                        fill(255, 150);
+                        text(linesBelow, cx, cy);
+                    }
+                }
+            }
+        }
+
+        function drawGrid() {
+            stroke(30);
+            strokeWeight(1 / 20);
+            for(let i = -100; i <= 100; i += 1) {
+                line(i, -100, i, 100);
+                line(-100, i, 100, i);
+            }
+            stroke(60);
+            line(-100, 0, 100, 0);
+            line(0, -100, 0, 100);
+        }
+
+        function applyView(v) {
+            translate(v.cx + v.x, v.cy + v.y);
+            scale(v.s);
+            // Flip Y for standard Cartesian
+            scale(1, -1);
+        }
+
+        function mousePressed() {
+            if (mouseX < width/2) {
+                if (keyIsDown(SHIFT)) {
+                    // Add point to primal
+                    let p = screenToWorld(mouseX, mouseY, views[0]);
+                    points.push({a: p.x, b: p.y});
+                } else {
+                    // Try to grab a point
+                    draggedPoint = getPointAt(mouseX, mouseY);
+                }
+            }
+        }
+
+        function getPointAt(sx, sy) {
+            let threshold = 10; // pixels
+            for (let p of points) {
+                let screenPos = worldToScreen(p.a, p.b, views[0]);
+                let d = dist(sx, sy, screenPos.x, screenPos.y);
+                if (d < threshold) return p;
+            }
+            return null;
+        }
+
+        function worldToScreen(wx, wy, v) {
+            return {
+                x: v.cx + v.x + wx * v.s,
+                y: v.cy + v.y - wy * v.s
+            };
+        }
+
+        function mouseDragged() {
+            if (draggedPoint) {
+                let p = screenToWorld(mouseX, mouseY, views[0]);
+                draggedPoint.a = p.x;
+                draggedPoint.b = p.y;
+            } else {
+                let idx = mouseX < width/2 ? 0 : 1;
+                views[idx].x += (mouseX - pmouseX);
+                views[idx].y += (mouseY - pmouseY);
+            }
+        }
+
+        function mouseReleased() {
+            draggedPoint = null;
+        }
+
+        function mouseWheel(event) {
+            let idx = mouseX < width/2 ? 0 : 1;
+            let zoomFactor = event.delta > 0 ? 0.9 : 1.1;
+            views[idx].s *= zoomFactor;
+            return false;
+        }
+
+        function screenToWorld(sx, sy, v) {
+            let x = (sx - v.cx - v.x) / v.s;
+            let y = (sy - v.cy - v.y) / v.s;
+            return { x: x, y: -y }; // Adjustment for the Y-flip
+        }
+
+        function clipPlane(x, y, w, h) {
+            drawingContext.beginPath();
+            drawingContext.rect(x, y, w, h);
+            drawingContext.clip();
+        }
+
+        function centerDual() {
+            if (points.length < 2) return;
+            // Center dual plane around intersections
+            let sumX = 0, sumY = 0, count = 0;
+            for(let i = 0; i < points.length; i++) {
+                for(let j = i + 1; j < points.length; j++) {
+                    let p1 = points[i], p2 = points[j];
+                    if (p1.a === p2.a) continue;
+                    let ix = (p1.b - p2.b) / (p1.a - p2.a);
+                    let iy = p1.a * ix - p1.b;
+                    sumX += ix; sumY += iy; count++;
+                }
+            }
+            if (count > 0) {
+                views[1].x = -(sumX/count) * views[1].s;
+                views[1].y = (sumY/count) * views[1].s;
+            }
+        }
+
+        function resetPoints() { points = []; }
+        function removeLast() { points.pop(); }
+        function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+    </script>
+</body>
+</html>
+
