@@ -152,7 +152,7 @@
 
             // Draw regions
             for (let poly of polygons) {
-                let hue = map(poly.level, 0, maxPoints, 240, 0);
+                let hue = Math.round(map(poly.level, 0, maxPoints, 240, 0));
                 fill(`hsla(${hue}, 80%, 35%, 0.7)`);
                 beginShape();
                 for (let pt of poly.vertices) {
