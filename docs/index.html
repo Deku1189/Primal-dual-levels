@@ -1,26 +1,55 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #1a1a1a;
+            font-family: sans-serif;
+        }
+
         .controls {
-            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            display: flex; gap: 10px; z-index: 10;
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 10;
         }
+
         button {
-            padding: 8px 16px; cursor: pointer; border-radius: 4px; border: none;
-            background: #333; color: white; transition: 0.2s;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            border: none;
+            background: #333;
+            color: white;
+            transition: 0.2s;
         }
-        button:hover { background: #444; }
+
+        button:hover {
+            background: #444;
+        }
+
         .label {
-            position: absolute; top: 10px; color: #aaa; font-size: 12px; pointer-events: none;
+            position: absolute;
+            top: 10px;
+            color: #aaa;
+            font-size: 12px;
+            pointer-events: none;
         }
     </style>
 </head>
+
 <body>
-    <div class="label" style="left: 20px;">PRIMAL PLANE (Points) - Drag Points, Space to Pan, Shift+Click to Add</div>
-    <div class="label" style="right: 20px;">DUAL PLANE (Lines: y = ax - b) - Regions colored by lines below</div>
+    <div class="label" style="left: 20px;">PRIMAL PLANE (Points) - Drag Points to Move them; Drag space to Pan;
+        Shift+Click to Add Points;<br />Hold Shift to preview the point's dual line.</div>
+    <div class="label" style="right: 20px;">DUAL PLANE (Lines: y = ax - b) - Regions colored by lines below
+        (level).<br />Hold Shift to preview the mouse's dual line.</div>
     <div class="controls">
         <button onclick="resetPoints()">Clear All</button>
         <button onclick="removeLast()">Undo Point</button>
@@ -35,22 +64,22 @@
         function setup() {
             createCanvas(windowWidth, windowHeight);
             // View [x_offset, y_offset, scale, centerX, centerY]
-            views[0] = { x: -width/4, y: 0, s: 20, cx: width/4, cy: height/2 }; // Primal
-            views[1] = { x: 0, y: 0, s: 20, cx: 3*width/4, cy: height/2 };    // Dual
-            
+            views[0] = { x: 0, y: 0, s: 20, cx: width / 4, cy: height / 2 }; // Primal
+            views[1] = { x: 0, y: 0, s: 20, cx: 3 * width / 4, cy: height / 2 };    // Dual
+
             // Initial dummy points
-            points.push({a: 1, b: 2}, {a: -2, b: -1}, {a: 0.5, b: -3});
+            points.push({ a: 1, b: 2 }, { a: -2, b: -1 }, { a: 0.5, b: -3 });
         }
 
         function draw() {
             background(15);
-            
+
             // Handle Cursor Appearance
             updateCursor();
 
             // Draw Splitter
             stroke(40);
-            line(width/2, 0, width/2, height);
+            line(width / 2, 0, width / 2, height);
 
             drawPrimal();
             drawDual();
@@ -69,52 +98,74 @@
                     }
                 }
             } else {
-                cursor(ARROW);
+                if (keyIsDown(SHIFT)) {
+                    cursor(CROSS);
+                } else {
+                    cursor(ARROW);
+                }
             }
         }
 
         function drawPrimal() {
             push();
-            clipPlane(0, 0, width/2, height);
+            clipPlane(0, 0, width / 2, height);
             applyView(views[0]);
-            
+
             // Grid
             drawGrid();
 
             // Points
             noStroke();
             fill(0, 200, 255);
-            for(let p of points) {
-                ellipse(p.a, p.b, 8/views[0].s, 8/views[0].s);
+            for (let p of points) {
+                ellipse(p.a, p.b, 8 / views[0].s, 8 / views[0].s);
             }
+
+            // Temporary hover line from Dual plane
+            if (keyIsDown(SHIFT) && mouseX >= width / 2) {
+                let dp = screenToWorld(mouseX, mouseY, views[1]);
+                stroke(0, 255, 255, 200); // Cyan highlight line
+                strokeWeight(2 / views[0].s);
+                let xStart = -100000, xEnd = 100000;
+                line(xStart, dp.x * xStart - dp.y, xEnd, dp.x * xEnd - dp.y);
+            }
+
             pop();
         }
 
         function drawDual() {
             push();
-            clipPlane(width/2, 0, width/2, height);
+            clipPlane(width / 2, 0, width / 2, height);
             applyView(views[1]);
 
-            // Region Visualization (Heatmap-style for performance)
+            // Region Visualization (Geometrically rigorous polygons)
             if (points.length > 0) {
                 drawLevels();
             }
 
-            drawGrid();
-
             // Dual Lines: y = ax - b
             stroke(255, 100, 100, 200);
             strokeWeight(1.5 / views[1].s);
-            for(let p of points) {
-                let xStart = -1000, xEnd = 1000;
+            for (let p of points) {
+                let xStart = -100000, xEnd = 100000;
                 line(xStart, p.a * xStart - p.b, xEnd, p.a * xEnd - p.b);
             }
+
+            // Temporary hover line from Primal plane
+            if (keyIsDown(SHIFT) && mouseX < width / 2) {
+                let p = screenToWorld(mouseX, mouseY, views[0]);
+                stroke(255, 255, 0, 200); // Yellow highlight line
+                strokeWeight(2 / views[1].s);
+                let xStart = -100000, xEnd = 100000;
+                line(xStart, p.x * xStart - p.y, xEnd, p.x * xEnd - p.y);
+            }
+
             pop();
         }
 
         function drawLevels() {
             let v = views[1];
-            let startX = (width/2 - (v.cx + v.x)) / v.s;
+            let startX = (width / 2 - (v.cx + v.x)) / v.s;
             let endX = (width - (v.cx + v.x)) / v.s;
             let startY = (v.cy + v.y - height) / v.s;
             let endY = (v.cy + v.y) / v.s;
@@ -122,10 +173,10 @@
             // Start with the bounding box of the dual plane viewport
             let polygons = [{
                 vertices: [
-                    {x: startX, y: startY}, 
-                    {x: endX, y: startY}, 
-                    {x: endX, y: endY}, 
-                    {x: startX, y: endY}
+                    { x: startX, y: startY },
+                    { x: endX, y: startY },
+                    { x: endX, y: endY },
+                    { x: startX, y: endY }
                 ],
                 level: 0
             }];
@@ -136,7 +187,7 @@
                 for (let poly of polygons) {
                     let polyBelow = clipPolygonSide(poly.vertices, p, true);
                     let polyAbove = clipPolygonSide(poly.vertices, p, false);
-                    
+
                     if (polyBelow.length > 2) {
                         nextPolygons.push({ vertices: polyBelow, level: poly.level + 1 });
                     }
@@ -166,15 +217,15 @@
             for (let poly of polygons) {
                 let area = calculatePolygonArea(poly.vertices);
                 let screenArea = area * v.s * v.s;
-                
+
                 // Only label regions that take up some meaningful screen space
-                if (screenArea > 100) { 
+                if (screenArea > 100) {
                     let c = calculatePolygonCentroid(poly.vertices);
                     push();
                     translate(c.x, c.y);
                     // Negate coordinate scaling to render fixed pixel size text upright
-                    scale(1/v.s, -1/v.s); 
-                    
+                    scale(1 / v.s, -1 / v.s);
+
                     textSize(15);
                     textStyle(BOLD);
                     fill(0, 200);
@@ -189,17 +240,17 @@
         function clipPolygonSide(polygon, lineP, keepBelow) {
             let result = [];
             if (polygon.length < 3) return result;
-            
+
             for (let i = 0; i < polygon.length; i++) {
                 let cur = polygon[i];
                 let prev = polygon[(i - 1 + polygon.length) % polygon.length];
-                
+
                 let curVal = lineP.a * cur.x - cur.y - lineP.b;
                 let prevVal = lineP.a * prev.x - prev.y - lineP.b;
-                
+
                 let curInside = keepBelow ? (curVal <= 0) : (curVal > 0);
                 let prevInside = keepBelow ? (prevVal <= 0) : (prevVal > 0);
-                
+
                 if (curInside) {
                     if (!prevInside) {
                         result.push(intersectLineSegments(prev, cur, lineP));
@@ -209,15 +260,15 @@
                     result.push(intersectLineSegments(prev, cur, lineP));
                 }
             }
-            
+
             // Deduplicate generated vertices due to clipping precisely on a point
             let dedup = [];
             for (let v of result) {
-                if (dedup.length === 0 || dist(dedup[dedup.length-1].x, dedup[dedup.length-1].y, v.x, v.y) > 1e-7) {
+                if (dedup.length === 0 || dist(dedup[dedup.length - 1].x, dedup[dedup.length - 1].y, v.x, v.y) > 1e-7) {
                     dedup.push(v);
                 }
             }
-            if (dedup.length > 1 && dist(dedup[0].x, dedup[0].y, dedup[dedup.length-1].x, dedup[dedup.length-1].y) < 1e-7) {
+            if (dedup.length > 1 && dist(dedup[0].x, dedup[0].y, dedup[dedup.length - 1].x, dedup[dedup.length - 1].y) < 1e-7) {
                 dedup.pop();
             }
             return dedup;
@@ -227,7 +278,7 @@
             let dx = p2.x - p1.x;
             let dy = p2.y - p1.y;
             let denom = lineP.a * dx - dy;
-            if (Math.abs(denom) < 1e-12) return {x: p1.x, y: p1.y}; 
+            if (Math.abs(denom) < 1e-12) return { x: p1.x, y: p1.y };
             let num = lineP.b + p1.y - lineP.a * p1.x;
             let t = num / denom;
             return { x: p1.x + t * dx, y: p1.y + t * dy };
@@ -256,7 +307,7 @@
             if (Math.abs(area) < 1e-9) return vertices[0];
             cx /= (6 * area);
             cy /= (6 * area);
-            return {x: cx, y: cy};
+            return { x: cx, y: cy };
         }
 
 
@@ -275,11 +326,11 @@
         }
 
         function mousePressed() {
-            if (mouseX < width/2) {
+            if (mouseX < width / 2) {
                 if (keyIsDown(SHIFT)) {
                     // Add point to primal
                     let p = screenToWorld(mouseX, mouseY, views[0]);
-                    points.push({a: p.x, b: p.y});
+                    points.push({ a: p.x, b: p.y });
                 } else {
                     // Try to grab a point
                     draggedPoint = getPointAt(mouseX, mouseY);
@@ -310,7 +361,7 @@
                 draggedPoint.a = p.x;
                 draggedPoint.b = p.y;
             } else {
-                let idx = mouseX < width/2 ? 0 : 1;
+                let idx = mouseX < width / 2 ? 0 : 1;
                 views[idx].x += (mouseX - pmouseX);
                 views[idx].y += (mouseY - pmouseY);
             }
@@ -321,7 +372,7 @@
         }
 
         function mouseWheel(event) {
-            let idx = mouseX < width/2 ? 0 : 1;
+            let idx = mouseX < width / 2 ? 0 : 1;
             let zoomFactor = event.delta > 0 ? 0.9 : 1.1;
             views[idx].s *= zoomFactor;
             return false;
@@ -343,8 +394,8 @@
             if (points.length < 2) return;
             // Center dual plane around intersections
             let sumX = 0, sumY = 0, count = 0;
-            for(let i = 0; i < points.length; i++) {
-                for(let j = i + 1; j < points.length; j++) {
+            for (let i = 0; i < points.length; i++) {
+                for (let j = i + 1; j < points.length; j++) {
                     let p1 = points[i], p2 = points[j];
                     if (p1.a === p2.a) continue;
                     let ix = (p1.b - p2.b) / (p1.a - p2.a);
@@ -353,8 +404,8 @@
                 }
             }
             if (count > 0) {
-                views[1].x = -(sumX/count) * views[1].s;
-                views[1].y = (sumY/count) * views[1].s;
+                views[1].x = -(sumX / count) * views[1].s;
+                views[1].y = (sumY / count) * views[1].s;
             }
         }
 
@@ -363,5 +414,5 @@
         function windowResized() { resizeCanvas(windowWidth, windowHeight); }
     </script>
 </body>
-</html>
 
+</html>
